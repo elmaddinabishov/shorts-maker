@@ -40,8 +40,11 @@ jobs:
         run: |
           $p = Start-Process -FilePath "dist\ShortsMaker.exe" -ArgumentList "--selftest","$PWD\test.mp4" -Wait -PassThru
           $log = "$env:APPDATA\ShortsMaker\selftest_log.txt"
-          if (Test-Path $log) { Get-Content $log }
           if ($p.ExitCode -ne 0 -or -not (Test-Path test.mp4)) {
+            $t = "no log"
+            if (Test-Path $log) { $t = (Get-Content $log -Raw) }
+            $t = $t.Substring([Math]::Max(0, $t.Length - 3000)) -replace "`r?`n", '%0A'
+            Write-Host "::error title=selftest exit $($p.ExitCode)::$t"
             throw "Self-test failed (exit $($p.ExitCode))"
           }
           Write-Host "Self-test OK: $((Get-Item test.mp4).Length) bytes"
