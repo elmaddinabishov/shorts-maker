@@ -14,10 +14,9 @@ async def run(voice, text, rate, boundary):
         return f"FAIL {type(e).__name__}: {e}"
 async def main():
     lines = [f"edge-tts {edge_tts.__version__ if hasattr(edge_tts,'__version__') else '?'}"]
-    for v, t in [("tr-TR-AhmetNeural", TEXT), ("tr-TR-EmelNeural", TEXT), ("az-AZ-BabekNeural", AZ),
-                 ("az-AZ-BanuNeural", AZ), ("en-US-AndrewNeural", "Hello world test.")]:
-        for rate in ["+5%", "+0%"]:
-            for b in ["WordBoundary", None]:
-                lines.append(f"{v} rate={rate} boundary={b}: {await run(v, t, rate, b)}")
+    for v in ["tr-TR-AhmetNeural", "en-US-AndrewMultilingualNeural", "en-US-BrianMultilingualNeural",
+              "de-DE-FlorianMultilingualNeural", "fr-FR-RemyMultilingualNeural", "it-IT-GiuseppeMultilingualNeural"]:
+        lines.append(f"{v}: {await run(v, TEXT, '+0%', 'WordBoundary')}")
+    lines.append("voices tr: " + ", ".join(x["ShortName"] for x in await edge_tts.list_voices() if x["Locale"].startswith("tr")))
     print("::warning title=tts-diag::" + "%0A".join(lines))
 asyncio.run(main())
