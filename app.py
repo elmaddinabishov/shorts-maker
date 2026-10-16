@@ -20,9 +20,20 @@ if sys.stdout is None or sys.stderr is None:
 
 # Build check: ShortsMaker.exe --selftest <output.mp4>
 if len(sys.argv) >= 3 and sys.argv[1] == "--selftest":
-    import engine
+    import faulthandler
 
-    sys.exit(0 if engine.selftest(sys.argv[2]) else 1)
+    _tlog = open(APP_DIR / "selftest_log.txt", "w", encoding="utf-8")
+    sys.stdout = sys.stderr = _tlog
+    faulthandler.dump_traceback_later(150, exit=True, file=_tlog)
+    try:
+        import engine
+
+        ok = engine.selftest(sys.argv[2])
+    except Exception:
+        traceback.print_exc()
+        ok = False
+    _tlog.flush()
+    sys.exit(0 if ok else 1)
 
 import tkinter as tk
 from tkinter import messagebox, ttk

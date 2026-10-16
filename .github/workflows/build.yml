@@ -23,6 +23,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt pyinstaller
 
+      - name: Self-test code (Python)
+        timeout-minutes: 5
+        run: python -c "import engine; assert engine.selftest('py_test.mp4')"
+
       - name: Build exe
         run: >
           pyinstaller --onefile --windowed --name ShortsMaker
@@ -31,11 +35,13 @@ jobs:
           app.py
 
       - name: Self-test exe (FFmpeg, fonts, rendering)
+        timeout-minutes: 6
         shell: pwsh
         run: |
           $p = Start-Process -FilePath "dist\ShortsMaker.exe" -ArgumentList "--selftest","$PWD\test.mp4" -Wait -PassThru
+          $log = "$env:APPDATA\ShortsMaker\selftest_log.txt"
+          if (Test-Path $log) { Get-Content $log }
           if ($p.ExitCode -ne 0 -or -not (Test-Path test.mp4)) {
-            if (Test-Path "$env:APPDATA\ShortsMaker\log.txt") { Get-Content "$env:APPDATA\ShortsMaker\log.txt" }
             throw "Self-test failed (exit $($p.ExitCode))"
           }
           Write-Host "Self-test OK: $((Get-Item test.mp4).Length) bytes"
