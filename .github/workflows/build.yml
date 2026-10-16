@@ -31,7 +31,8 @@ jobs:
         run: >
           pyinstaller --onefile --windowed --name ShortsMaker
           --collect-all imageio_ffmpeg --collect-all moviepy
-          --collect-data certifi --collect-all edge_tts
+          --collect-data certifi --collect-all edge_tts --collect-all imageio
+          --copy-metadata imageio --copy-metadata imageio_ffmpeg --copy-metadata moviepy
           app.py
 
       - name: Self-test exe (FFmpeg, fonts, rendering)
