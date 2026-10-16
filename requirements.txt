@@ -1,0 +1,4 @@
+edge-tts
+moviepy>=2.0
+requests
+numpy

@@ -1,0 +1,49 @@
+name: Build ShortsMaker.exe
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build exe
+        run: >
+          pyinstaller --onefile --windowed --name ShortsMaker
+          --collect-all imageio_ffmpeg --collect-all moviepy
+          --collect-data certifi --collect-all edge_tts
+          app.py
+
+      - name: Self-test exe (FFmpeg, fonts, rendering)
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath "dist\ShortsMaker.exe" -ArgumentList "--selftest","$PWD\test.mp4" -Wait -PassThru
+          if ($p.ExitCode -ne 0 -or -not (Test-Path test.mp4)) {
+            if (Test-Path "$env:APPDATA\ShortsMaker\log.txt") { Get-Content "$env:APPDATA\ShortsMaker\log.txt" }
+            throw "Self-test failed (exit $($p.ExitCode))"
+          }
+          Write-Host "Self-test OK: $((Get-Item test.mp4).Length) bytes"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: ShortsMaker v${{ github.run_number }}
+          files: dist/ShortsMaker.exe
+          make_latest: true
