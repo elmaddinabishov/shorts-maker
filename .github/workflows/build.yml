@@ -55,7 +55,7 @@ jobs:
         run: |
           Add-Type -AssemblyName System.Windows.Forms, System.Drawing
           New-Item -ItemType Directory -Force "$env:APPDATA\ShortsMaker" | Out-Null
-          '{"pixabay_key": "demo"}' | Set-Content "$env:APPDATA\ShortsMaker\config.json"
+          '{"lang": "Azərbaycanca"}' | Set-Content "$env:APPDATA\ShortsMaker\config.json"
           $p = Start-Process "dist\ShortsMaker.exe" -PassThru
           Start-Sleep -Seconds 25
           $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds

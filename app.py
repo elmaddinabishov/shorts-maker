@@ -84,7 +84,7 @@ class SettingsDialog(ctk.CTkToplevel):
         super().__init__(app)
         self.app = app
         self.title("Ayarlar")
-        self.geometry("480x430")
+        self.geometry("520x520")
         self.resizable(False, False)
         self.configure(fg_color=PANEL)
         self.transient(app)
@@ -102,12 +102,19 @@ class SettingsDialog(ctk.CTkToplevel):
         link.pack(anchor="w", padx=28)
         link.bind("<Button-1>", lambda e: webbrowser.open("https://pixabay.com/api/docs/"))
 
+        ctk.CTkLabel(self, text="Səsləndirmə dili", font=F(13, True), text_color=MUTED).pack(anchor="w", padx=28, pady=(18, 0))
+        self.lang = ctk.CTkSegmentedButton(self, values=list(engine.LANGUAGES), height=36, font=F(13),
+                                           selected_color=ACCENT, selected_hover_color=ACCENT_HOVER,
+                                           fg_color=CARD, unselected_color=CARD, command=self.on_lang)
+        self.lang.set(app.lang())
+        self.lang.pack(fill="x", padx=28, pady=(6, 0))
+
         ctk.CTkLabel(self, text="Səs", font=F(13, True), text_color=MUTED).pack(anchor="w", padx=28, pady=(18, 0))
-        self.voice = ctk.CTkOptionMenu(self, values=list(engine.VOICES), height=40, corner_radius=10,
+        self.voice = ctk.CTkOptionMenu(self, values=["-"], height=40, corner_radius=10,
                                        font=F(14), fg_color=CARD, button_color=CARD,
                                        button_hover_color=BORDER, dropdown_font=F(13))
-        self.voice.set(app.cfg.get("voice", list(engine.VOICES)[0]))
         self.voice.pack(fill="x", padx=28, pady=(6, 0))
+        self.on_lang(app.lang(), app.cfg.get("voice"))
 
         ctk.CTkLabel(self, text="Danışıq sürəti", font=F(13, True), text_color=MUTED).pack(anchor="w", padx=28, pady=(18, 0))
         self.rate = ctk.CTkSegmentedButton(self, values=engine.RATES, height=36, font=F(13),
@@ -120,8 +127,14 @@ class SettingsDialog(ctk.CTkToplevel):
                       fg_color=ACCENT, hover_color=ACCENT_HOVER, command=self.save).pack(
             fill="x", padx=28, pady=(26, 0))
 
+    def on_lang(self, lang, keep_voice=None):
+        names = list(engine.LANGUAGES[lang]["voices"])
+        self.voice.configure(values=names)
+        self.voice.set(keep_voice if keep_voice in names else names[0])
+
     def save(self):
-        self.app.cfg.update(pixabay_key=self.key.get().strip(), voice=self.voice.get(), rate=self.rate.get())
+        self.app.cfg.update(pixabay_key=self.key.get().strip(), lang=self.lang.get(),
+                            voice=self.voice.get(), rate=self.rate.get())
         save_config(self.app.cfg)
         self.app.update_stats()
         self.destroy()
@@ -152,6 +165,14 @@ class App(ctk.CTk):
         self.update_stats()
         if not self.cfg.get("pixabay_key"):
             self.after(400, self.open_settings)
+
+    def lang(self):
+        lang = self.cfg.get("lang", "English")
+        return lang if lang in engine.LANGUAGES else "English"
+
+    def voice_id(self):
+        voices = engine.LANGUAGES[self.lang()]["voices"]
+        return voices.get(self.cfg.get("voice"), list(voices.values())[0])
 
     # Sidebar: brand, format cards, settings
     def _build_sidebar(self):
@@ -197,8 +218,8 @@ class App(ctk.CTk):
         head = ctk.CTkFrame(main, fg_color="transparent")
         head.grid(row=0, column=0, sticky="ew")
         ctk.CTkLabel(head, text="Ssenari", font=F(22, True)).pack(anchor="w")
-        ctk.CTkLabel(head, text="İngiliscə yazın. Hər abzas bir səhnədir. Videonu özünüz seçmək üçün "
-                                "abzasın əvvəlinə [açar söz] yazın.",
+        ctk.CTkLabel(head, text="Ayarlarda seçdiyiniz dildə yazın. Hər abzas bir səhnədir. Videonu özünüz seçmək "
+                                "üçün abzasın əvvəlinə ingiliscə [açar söz] yazın.",
                      font=F(13), text_color=MUTED, wraplength=700, justify="left").pack(anchor="w", pady=(2, 12))
 
         self.text = ctk.CTkTextbox(main, corner_radius=16, font=F(15), fg_color=PANEL,
@@ -261,8 +282,8 @@ class App(ctk.CTk):
         raw = self.text.get("1.0", "end")
         words = engine.word_count(raw)
         scenes = len(engine.parse_scenes(raw))
-        est = engine.estimate_seconds(raw, self.cfg.get("rate", "+5%"))
-        self.stats_lbl.configure(text=f"{words} söz  ·  {scenes} səhnə")
+        est = engine.estimate_seconds(raw, self.cfg.get("rate", "+5%"), self.lang())
+        self.stats_lbl.configure(text=f"{words} söz  ·  {scenes} səhnə  ·  {self.lang()}")
         if self.fmt == "shorts":
             limit = engine.SHORTS_MAX_SEC
             color = GREEN if est <= limit * 0.9 else ORANGE if est <= limit else RED
@@ -298,7 +319,7 @@ class App(ctk.CTk):
             messagebox.showwarning("ShortsMaker", "Ssenari boşdur.")
             return
         if self.fmt == "shorts":
-            est = engine.estimate_seconds(script, self.cfg.get("rate", "+5%"))
+            est = engine.estimate_seconds(script, self.cfg.get("rate", "+5%"), self.lang())
             if est > engine.SHORTS_MAX_SEC + 5:
                 messagebox.showwarning(
                     "Ssenari uzundur",
@@ -315,13 +336,12 @@ class App(ctk.CTk):
         self.busy = True
         self.go.configure(state="disabled", text="⏳  Yaradılır...")
         self.set_progress("Başlayır...", 0)
-        voice = engine.VOICES.get(self.cfg.get("voice"), list(engine.VOICES.values())[0])
-        args = (script, key, voice, self.cfg.get("rate", "+5%"), out, self.fmt)
+        args = (script, key, self.voice_id(), self.cfg.get("rate", "+5%"), out, self.fmt, self.lang())
         threading.Thread(target=self.run, args=args, daemon=True).start()
 
-    def run(self, script, key, voice, rate, out, fmt):
+    def run(self, script, key, voice, rate, out, fmt, lang):
         try:
-            dur = engine.generate(script, key, voice, rate, out, fmt, self.set_progress)
+            dur = engine.generate(script, key, voice, rate, out, fmt, self.set_progress, lang)
             self.set_progress(f"Hazırdır! {dur:.0f} saniyəlik video: {out.name}", 1.0)
             self.after(0, lambda: messagebox.showinfo("Video hazırdır", f"{dur:.0f} saniyəlik video yaradıldı:\n{out}"))
         except engine.ScriptTooLong as e:
