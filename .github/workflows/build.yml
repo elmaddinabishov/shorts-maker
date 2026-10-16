@@ -25,13 +25,13 @@ jobs:
 
       - name: Self-test code (Python)
         timeout-minutes: 5
-        run: python -c "import engine; assert engine.selftest('py_test.mp4')"
+        run: python -c "import engine; assert engine.selftest('.')"
 
       - name: Build exe
         run: >
           pyinstaller --onefile --windowed --name ShortsMaker
           --collect-all imageio_ffmpeg --collect-all moviepy
-          --collect-data certifi --collect-all edge_tts --collect-all imageio
+          --collect-data certifi --collect-all edge_tts --collect-all imageio --collect-all customtkinter
           --copy-metadata imageio --copy-metadata imageio_ffmpeg --copy-metadata moviepy
           app.py
 
@@ -39,21 +39,37 @@ jobs:
         timeout-minutes: 6
         shell: pwsh
         run: |
-          $p = Start-Process -FilePath "dist\ShortsMaker.exe" -ArgumentList "--selftest","$PWD\test.mp4" -Wait -PassThru
+          $p = Start-Process -FilePath "dist\ShortsMaker.exe" -ArgumentList "--selftest","$PWD" -Wait -PassThru
           $log = "$env:APPDATA\ShortsMaker\selftest_log.txt"
-          if ($p.ExitCode -ne 0 -or -not (Test-Path test.mp4)) {
+          if ($p.ExitCode -ne 0 -or -not (Test-Path selftest_shorts.mp4) -or -not (Test-Path selftest_long.mp4)) {
             $t = "no log"
             if (Test-Path $log) { $t = (Get-Content $log -Raw) }
             $t = $t.Substring([Math]::Max(0, $t.Length - 3000)) -replace "`r?`n", '%0A'
             Write-Host "::error title=selftest exit $($p.ExitCode)::$t"
             throw "Self-test failed (exit $($p.ExitCode))"
           }
-          Write-Host "Self-test OK: $((Get-Item test.mp4).Length) bytes"
+          Write-Host "Self-test OK"
+
+      - name: Screenshot UI
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+          New-Item -ItemType Directory -Force "$env:APPDATA\ShortsMaker" | Out-Null
+          '{"pixabay_key": "demo"}' | Set-Content "$env:APPDATA\ShortsMaker\config.json"
+          $p = Start-Process "dist\ShortsMaker.exe" -PassThru
+          Start-Sleep -Seconds 25
+          $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
+          [System.Drawing.Graphics]::FromImage($bmp).CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
+          $bmp.Save("$PWD\ui-screenshot.png")
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.run_number }}
           name: ShortsMaker v${{ github.run_number }}
-          files: dist/ShortsMaker.exe
+          files: |
+            dist/ShortsMaker.exe
+            ui-screenshot.png
           make_latest: true

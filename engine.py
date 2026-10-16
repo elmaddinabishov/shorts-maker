@@ -1,5 +1,5 @@
 """
-Video engine: script text -> YouTube Shorts MP4 (1080x1920).
+Video engine: script text -> YouTube video (Shorts 1080x1920 or Long 1920x1080).
 Voiceover: edge-tts (free). Footage: Pixabay API (free key). Montage: MoviePy + bundled FFmpeg.
 """
 import asyncio
@@ -9,8 +9,16 @@ from pathlib import Path
 
 import requests
 
-W, H, FPS = 1080, 1920, 30
-WORDS_PER_CAPTION = 3
+FPS = 30
+SHORTS_MAX_SEC = 59.0
+WORDS_PER_SEC = 2.6  # typical narration pace at +0%
+
+FORMATS = {
+    "shorts": dict(size=(1080, 1920), font_size=95, stroke=7, cap_y=0.62, words=3, upper=True,
+                   margin=160, max_sec=SHORTS_MAX_SEC),
+    "long": dict(size=(1920, 1080), font_size=62, stroke=5, cap_y=0.80, words=6, upper=False,
+                 margin=320, max_sec=None),
+}
 
 FONT_CANDIDATES = [
     r"C:\Windows\Fonts\arialbd.ttf",
@@ -27,6 +35,7 @@ VOICES = {
     "Ryan (UK, kişi)": "en-GB-RyanNeural",
     "Sonia (UK, qadın)": "en-GB-SoniaNeural",
 }
+RATES = ["-10%", "+0%", "+5%", "+10%", "+20%"]
 
 STOPWORDS = set("""
 a an the and or but if of to in on at for with from by as is are was were be been being
@@ -37,6 +46,10 @@ about into over after before up down out off again only own same too now know li
 didn while because even ever every still much many make makes made let lets get gets
 follow part instead rest through
 """.split())
+
+
+class ScriptTooLong(RuntimeError):
+    pass
 
 
 def find_font():
@@ -72,6 +85,18 @@ def parse_scenes(raw):
     return scenes
 
 
+def word_count(raw):
+    return sum(len(t.split()) for t, _ in parse_scenes(raw))
+
+
+def estimate_seconds(raw, rate="+0%"):
+    try:
+        factor = 1 + int(rate.strip("%")) / 100
+    except ValueError:
+        factor = 1
+    return word_count(raw) / (WORDS_PER_SEC * factor)
+
+
 # ---------- Voiceover ----------
 async def _tts(text, mp3_path, voice, rate):
     import edge_tts
@@ -95,7 +120,7 @@ def tts(text, mp3_path, voice, rate):
     return asyncio.run(_tts(text, mp3_path, voice, rate))
 
 
-# ---------- Stock video ----------
+# ---------- Stock video (Pixabay) ----------
 def _download(url, dest):
     with requests.get(url, stream=True, timeout=60) as r:
         r.raise_for_status()
@@ -105,7 +130,6 @@ def _download(url, dest):
 
 
 def _pick_file(hit):
-    """Pick a reasonably sized MP4 from a Pixabay video hit (medium ~1080p preferred)."""
     vids = hit.get("videos", {})
     for size in ("medium", "large", "small"):
         f = vids.get(size) or {}
@@ -114,7 +138,7 @@ def _pick_file(hit):
     return None
 
 
-def fetch_video(query, dest, used_ids, api_key):
+def fetch_video(query, dest, used_ids, api_key, vertical):
     words = query.split()
     for q in dict.fromkeys([query, " ".join(words[:2]), words[0] if words else query]):
         r = requests.get(
@@ -123,17 +147,19 @@ def fetch_video(query, dest, used_ids, api_key):
             timeout=30,
         )
         if r.status_code in (400, 401, 403) and "key" in r.text.lower():
-            raise RuntimeError("Pixabay açarı yanlışdır. Açarı yoxlayın.")
+            raise RuntimeError("Pixabay açarı yanlışdır. Ayarlarda açarı yoxlayın.")
         if r.status_code == 429:
             raise RuntimeError("Pixabay limiti doldu. Bir dəqiqə sonra yenidən cəhd edin.")
         r.raise_for_status()
-        hits = [h for h in r.json().get("hits", []) if h.get("id") not in used_ids]
-        # Prefer vertical clips, then the rest (landscape gets center-cropped)
-        hits.sort(key=lambda h: 0 if (_pick_file(h) or {}).get("height", 0) >= (_pick_file(h) or {}).get("width", 1) else 1)
-        for h in hits:
+        hits = []
+        for h in r.json().get("hits", []):
             f = _pick_file(h)
-            if not f:
-                continue
+            if f and h.get("id") not in used_ids:
+                is_vertical = f.get("height", 0) >= f.get("width", 1)
+                hits.append((0 if is_vertical == vertical else 1, h, f))
+        hits.sort(key=lambda x: x[0])  # matching orientation first
+        if hits:
+            _, h, f = hits[0]
             used_ids.add(h["id"])
             _download(f["url"], dest)
             return True
@@ -141,10 +167,11 @@ def fetch_video(query, dest, used_ids, api_key):
 
 
 # ---------- Captions + montage ----------
-def _fit_vertical(clip):
-    scale = max(W / clip.w, H / clip.h)
+def _fit(clip, size):
+    w, h = size
+    scale = max(w / clip.w, h / clip.h)
     clip = clip.resized(scale)
-    return clip.cropped(x_center=clip.w / 2, y_center=clip.h / 2, width=W, height=H)
+    return clip.cropped(x_center=clip.w / 2, y_center=clip.h / 2, width=w, height=h)
 
 
 def _even_timings(text, dur):
@@ -153,41 +180,44 @@ def _even_timings(text, dur):
     return [(i * step, (i + 1) * step, w) for i, w in enumerate(ws)]
 
 
-def _captions(words, dur, font):
+def _captions(words, dur, font, fmt):
     from moviepy import TextClip
 
+    w, h = fmt["size"]
+    n = fmt["words"]
     clips = []
-    groups = [words[i:i + WORDS_PER_CAPTION] for i in range(0, len(words), WORDS_PER_CAPTION)]
+    groups = [words[i:i + n] for i in range(0, len(words), n)]
     for i, g in enumerate(groups):
         start = g[0][0]
         end = groups[i + 1][0][0] if i + 1 < len(groups) else dur
+        text = " ".join(x[2] for x in g)
         tc = TextClip(
-            font=font, text=" ".join(w[2] for w in g).upper(), font_size=95,
-            color="white", stroke_color="black", stroke_width=7,
-            method="caption", size=(W - 160, None), text_align="center", margin=(20, 40),
+            font=font, text=text.upper() if fmt["upper"] else text, font_size=fmt["font_size"],
+            color="white", stroke_color="black", stroke_width=fmt["stroke"],
+            method="caption", size=(w - fmt["margin"], None), text_align="center", margin=(20, 40),
         )
         clips.append(
             tc.with_start(start).with_duration(max(0.05, end - start))
-            .with_position(("center", int(H * 0.62)))
+            .with_position(("center", int(h * fmt["cap_y"]) - tc.h // 2))
         )
     return clips
 
 
-def make_scene(video_path, audio_path, words, text, font):
-    from moviepy import AudioFileClip, ColorClip, CompositeVideoClip, VideoFileClip, vfx
+def make_scene(video_path, audio, words, text, font, fmt):
+    from moviepy import ColorClip, CompositeVideoClip, VideoFileClip, vfx
 
-    audio = AudioFileClip(str(audio_path))
+    size = fmt["size"]
     dur = audio.duration + 0.15
     if video_path:
-        bg = _fit_vertical(VideoFileClip(str(video_path), audio=False))
+        bg = _fit(VideoFileClip(str(video_path), audio=False), size)
         bg = bg.with_effects([vfx.Loop(duration=dur)]) if bg.duration < dur else bg.subclipped(0, dur)
     else:
-        bg = ColorClip((W, H), color=(20, 20, 20), duration=dur)
-    caps = _captions(words or _even_timings(text, audio.duration), dur, font)
-    return CompositeVideoClip([bg, *caps], size=(W, H)).with_duration(dur).with_audio(audio)
+        bg = ColorClip(size, color=(20, 20, 20), duration=dur)
+    caps = _captions(words or _even_timings(text, audio.duration), dur, font, fmt)
+    return CompositeVideoClip([bg, *caps], size=size).with_duration(dur).with_audio(audio)
 
 
-def _render_logger(progress):
+def _render_logger(progress, start, span):
     from proglog import ProgressBarLogger
 
     class _L(ProgressBarLogger):
@@ -195,60 +225,85 @@ def _render_logger(progress):
             if bar == "frame_index" and attr == "index":
                 total = self.bars[bar].get("total") or 0
                 if total:
-                    progress("Video yığılır...", 0.75 + 0.25 * value / total)
+                    progress("Video yığılır...", start + span * value / total)
 
     return _L()
 
 
-def render(clips, out_path, progress):
+def render(clips, out_path, progress, start=0.55, span=0.45):
     from moviepy import concatenate_videoclips
 
     final = concatenate_videoclips(clips, method="compose")
     final.write_videofile(
         str(out_path), fps=FPS, codec="libx264", audio_codec="aac",
-        preset="medium", threads=4, logger=_render_logger(progress),
+        preset="medium", threads=4, logger=_render_logger(progress, start, span),
     )
     return final.duration
 
 
 # ---------- Public entry ----------
-def generate(script_text, api_key, voice, rate, out_path, progress=lambda msg, frac: None):
+def generate(script_text, api_key, voice, rate, out_path, fmt_name="shorts",
+             progress=lambda msg, frac: None):
+    from moviepy import AudioFileClip
+
+    fmt = FORMATS[fmt_name]
     font = find_font()
     scenes = parse_scenes(script_text)
     if not scenes:
         raise RuntimeError("Ssenari boşdur.")
     if not api_key:
-        raise RuntimeError("Pixabay açarını daxil edin.")
+        raise RuntimeError("Pixabay açarını Ayarlarda daxil edin.")
 
     work = Path(tempfile.mkdtemp(prefix="shortsmaker_"))
-    used, clips = set(), []
     n = len(scenes)
+
+    # 1) Voiceover for all scenes (0-15%)
+    voiced = []
     for i, (text, kw) in enumerate(scenes, 1):
-        progress(f"Səhnə {i}/{n}: səsləndirmə...", 0.75 * (i - 1) / n)
+        progress(f"Səhnə {i}/{n} səsləndirilir...", 0.15 * (i - 1) / n)
         mp3 = work / f"scene{i}.mp3"
         words = tts(text, mp3, voice, rate)
-        progress(f"Səhnə {i}/{n}: '{kw}' videosu axtarılır...", 0.75 * (i - 0.5) / n)
-        mp4 = work / f"scene{i}.mp4"
-        ok = fetch_video(kw, mp4, used, api_key)
-        clips.append(make_scene(mp4 if ok else None, mp3, words, text, font))
+        voiced.append((text, kw, words, AudioFileClip(str(mp3))))
 
-    progress("Video yığılır...", 0.75)
+    total = sum(a.duration + 0.15 for *_, a in voiced)
+    if fmt["max_sec"] and total > fmt["max_sec"]:
+        raise ScriptTooLong(
+            f"Səsləndirmə {total:.0f} saniyə alındı, Shorts üçün maksimum {fmt['max_sec']:.0f} saniyədir. "
+            "Ssenarini bir az qısaldın."
+        )
+
+    # 2) Stock footage (15-55%)
+    used, clips = set(), []
+    vertical = fmt["size"][1] > fmt["size"][0]
+    for i, (text, kw, words, audio) in enumerate(voiced, 1):
+        progress(f"Səhnə {i}/{n}: '{kw}' videosu yüklənir...", 0.15 + 0.40 * (i - 1) / n)
+        mp4 = work / f"scene{i}.mp4"
+        ok = fetch_video(kw, mp4, used, api_key, vertical)
+        clips.append(make_scene(mp4 if ok else None, audio, words, text, font, fmt))
+
+    # 3) Render (55-100%)
+    progress("Video yığılır...", 0.55)
     dur = render(clips, out_path, progress)
     progress("Hazırdır!", 1.0)
     return dur
 
 
-def selftest(out_path):
-    """Offline check that MoviePy, FFmpeg and fonts work (used by the build)."""
+def selftest(out_dir):
+    """Offline check that MoviePy, FFmpeg and fonts work in both formats (used by the build)."""
     import numpy as np
-    from moviepy import AudioClip
+    from moviepy import AudioClip, AudioFileClip
 
+    out_dir = Path(out_dir)
     work = Path(tempfile.mkdtemp(prefix="shortsmaker_test_"))
     wav = work / "a.wav"
     AudioClip(lambda t: np.sin(440 * 2 * np.pi * t) * 0.1, duration=2, fps=44100).write_audiofile(
         str(wav), logger=None
     )
     words = [(0, 0.6, "Self"), (0.6, 1.2, "test"), (1.2, 1.9, "works")]
-    clip = make_scene(None, wav, words, "Self test works", find_font())
-    render([clip], out_path, lambda m, f: None)
-    return Path(out_path).stat().st_size > 0
+    ok = True
+    for name, fmt in FORMATS.items():
+        out = out_dir / f"selftest_{name}.mp4"
+        clip = make_scene(None, AudioFileClip(str(wav)), words, "Self test works", find_font(), fmt)
+        render([clip], out, lambda m, f: None)
+        ok = ok and out.exists() and out.stat().st_size > 0
+    return ok
