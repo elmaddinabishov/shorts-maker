@@ -137,8 +137,11 @@ class App(ctk.CTk):
         self._stats_job = None
 
         self.title("ShortsMaker")
-        self.geometry("1100x740")
-        self.minsize(900, 620)
+        scale = self._get_window_scaling()
+        sw, sh = int(self.winfo_screenwidth() / scale), int(self.winfo_screenheight() / scale)
+        w, h = min(1100, sw - 40), min(740, sh - 90)
+        self.geometry(f"{w}x{h}+{max(0, (sw - w) // 2)}+{max(0, (sh - h) // 2 - 20)}")
+        self.minsize(min(820, w), min(560, h))
         self.configure(fg_color=BG)
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -162,13 +165,20 @@ class App(ctk.CTk):
         ctk.CTkLabel(side, text="FORMAT", font=F(12, True), text_color=MUTED).pack(anchor="w", padx=24, pady=(34, 8))
         self.cards = {}
         for key, icon, title, sub in [
-            ("shorts", "📱", "Shorts", "9:16 · maks. 59 san"),
-            ("long", "🖥️", "Uzun video", "16:9 · limitsiz"),
+            ("shorts", "📱", "Shorts", "9:16 · maks. 59 saniyə"),
+            ("long", "🖥", "Uzun video", "16:9 · limitsiz"),
         ]:
-            card = ctk.CTkButton(side, text=f"{icon}   {title}\n{sub}", anchor="w", height=72, corner_radius=14,
-                                 font=F(15, True), border_width=2, command=lambda k=key: self.select_format(k))
+            card = ctk.CTkFrame(side, corner_radius=14, border_width=2, cursor="hand2")
             card.pack(fill="x", padx=18, pady=5)
-            self.cards[key] = card
+            t = ctk.CTkLabel(card, text=f"{icon}  {title}", font=F(16, True), anchor="w", cursor="hand2")
+            t.pack(fill="x", padx=16, pady=(12, 0))
+            s = ctk.CTkLabel(card, text=sub, font=F(12), anchor="w", cursor="hand2")
+            s.pack(fill="x", padx=16, pady=(0, 12))
+            for w in (card, t, s):
+                w.bind("<Button-1>", lambda e, k=key: self.select_format(k))
+                w.bind("<Enter>", lambda e, k=key: self._hover(k, True))
+                w.bind("<Leave>", lambda e, k=key: self._hover(k, False))
+            self.cards[key] = (card, t, s)
 
         bottom = ctk.CTkFrame(side, fg_color="transparent")
         bottom.pack(side="bottom", fill="x", padx=18, pady=22)
@@ -232,11 +242,15 @@ class App(ctk.CTk):
         if self.busy:
             return
         self.fmt = key
-        for k, card in self.cards.items():
+        for k, (card, t, s) in self.cards.items():
             on = k == key
-            card.configure(fg_color=ACCENT if on else CARD, hover_color=ACCENT_HOVER if on else BORDER,
-                           border_color=ACCENT if on else BORDER)
+            card.configure(fg_color=ACCENT if on else CARD, border_color=ACCENT if on else BORDER)
+            s.configure(text_color="#ECE8FF" if on else MUTED)
         self.update_stats()
+
+    def _hover(self, key, inside):
+        if key != self.fmt:
+            self.cards[key][0].configure(fg_color=BORDER if inside else CARD)
 
     def schedule_stats(self):
         if self._stats_job:
