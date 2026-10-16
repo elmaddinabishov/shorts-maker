@@ -84,7 +84,7 @@ class SettingsDialog(ctk.CTkToplevel):
         super().__init__(app)
         self.app = app
         self.title("Ayarlar")
-        self.geometry("520x520")
+        self.geometry("520x570")
         self.resizable(False, False)
         self.configure(fg_color=PANEL)
         self.transient(app)
