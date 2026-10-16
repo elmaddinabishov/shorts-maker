@@ -89,10 +89,10 @@ class App:
 
         row = ttk.Frame(main)
         row.pack(fill="x", **pad)
-        ttk.Label(row, text="Pexels açarı:").grid(row=0, column=0, sticky="w")
+        ttk.Label(row, text="Pixabay açarı:").grid(row=0, column=0, sticky="w")
         self.key = ttk.Entry(row, show="•")
         self.key.grid(row=0, column=1, sticky="ew", padx=8)
-        self.key.insert(0, self.cfg.get("pexels_key", ""))
+        self.key.insert(0, self.cfg.get("pixabay_key", ""))
         row.columnconfigure(1, weight=1)
 
         ttk.Label(row, text="Səs:").grid(row=1, column=0, sticky="w", pady=(8, 0))
@@ -123,9 +123,9 @@ class App:
         script = self.text.get("1.0", "end").strip()
         key = self.key.get().strip()
         if not key:
-            messagebox.showwarning("ShortsMaker", "Pexels açarını daxil edin.")
+            messagebox.showwarning("ShortsMaker", "Pixabay açarını daxil edin.")
             return
-        self.cfg.update(pexels_key=key, voice=self.voice.get(), rate=self.rate.get(), last_script=script)
+        self.cfg.update(pixabay_key=key, voice=self.voice.get(), rate=self.rate.get(), last_script=script)
         save_config(self.cfg)
 
         OUT_DIR.mkdir(parents=True, exist_ok=True)

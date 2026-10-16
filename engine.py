@@ -1,6 +1,6 @@
 """
 Video engine: script text -> YouTube Shorts MP4 (1080x1920).
-Voiceover: edge-tts (free). Footage: Pexels API (free key). Montage: MoviePy + bundled FFmpeg.
+Voiceover: edge-tts (free). Footage: Pixabay API (free key). Montage: MoviePy + bundled FFmpeg.
 """
 import asyncio
 import re
@@ -104,33 +104,38 @@ def _download(url, dest):
                 f.write(part)
 
 
+def _pick_file(hit):
+    """Pick a reasonably sized MP4 from a Pixabay video hit (medium ~1080p preferred)."""
+    vids = hit.get("videos", {})
+    for size in ("medium", "large", "small"):
+        f = vids.get(size) or {}
+        if f.get("url"):
+            return f
+    return None
+
+
 def fetch_video(query, dest, used_ids, api_key):
-    headers = {"Authorization": api_key}
     words = query.split()
     for q in dict.fromkeys([query, " ".join(words[:2]), words[0] if words else query]):
         r = requests.get(
-            "https://api.pexels.com/videos/search",
-            headers=headers,
-            params={"query": q, "orientation": "portrait", "per_page": 15},
+            "https://pixabay.com/api/videos/",
+            params={"key": api_key, "q": q[:100], "per_page": 20, "safesearch": "true"},
             timeout=30,
         )
-        if r.status_code in (401, 403):
-            raise RuntimeError("Pexels açarı yanlışdır. Açarı yoxlayın.")
+        if r.status_code in (400, 401, 403) and "key" in r.text.lower():
+            raise RuntimeError("Pixabay açarı yanlışdır. Açarı yoxlayın.")
+        if r.status_code == 429:
+            raise RuntimeError("Pixabay limiti doldu. Bir dəqiqə sonra yenidən cəhd edin.")
         r.raise_for_status()
-        for v in r.json().get("videos", []):
-            if v["id"] in used_ids:
+        hits = [h for h in r.json().get("hits", []) if h.get("id") not in used_ids]
+        # Prefer vertical clips, then the rest (landscape gets center-cropped)
+        hits.sort(key=lambda h: 0 if (_pick_file(h) or {}).get("height", 0) >= (_pick_file(h) or {}).get("width", 1) else 1)
+        for h in hits:
+            f = _pick_file(h)
+            if not f:
                 continue
-            files = [
-                f for f in v.get("video_files", [])
-                if f.get("width") and f.get("height")
-                and f["height"] >= f["width"]
-                and f.get("file_type") == "video/mp4"
-            ]
-            if not files:
-                continue
-            best = min(files, key=lambda f: abs(f["height"] - H))
-            used_ids.add(v["id"])
-            _download(best["link"], dest)
+            used_ids.add(h["id"])
+            _download(f["url"], dest)
             return True
     return False
 
@@ -213,7 +218,7 @@ def generate(script_text, api_key, voice, rate, out_path, progress=lambda msg, f
     if not scenes:
         raise RuntimeError("Ssenari boşdur.")
     if not api_key:
-        raise RuntimeError("Pexels açarını daxil edin.")
+        raise RuntimeError("Pixabay açarını daxil edin.")
 
     work = Path(tempfile.mkdtemp(prefix="shortsmaker_"))
     used, clips = set(), []
