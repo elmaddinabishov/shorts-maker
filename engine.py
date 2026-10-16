@@ -37,7 +37,7 @@ LANGUAGES = {
         "Sonia (UK, qadın)": "en-GB-SoniaNeural",
     }),
     "Türkçe": dict(code="tr", search="tr", wps=2.2, voices={
-        "Ahmet (kişi)": "tr-TR-AhmetNeural",
+        "Andrew (çoxdilli, kişi)": "en-US-AndrewMultilingualNeural",
         "Emel (qadın)": "tr-TR-EmelNeural",
     }),
     "Azərbaycanca": dict(code="az", search="tr", wps=2.2, voices={
