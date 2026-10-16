@@ -66,8 +66,8 @@ class App:
         self.cfg = load_config()
         self.last_file = None
         root.title("ShortsMaker")
-        root.geometry("760x700")
-        root.minsize(600, 560)
+        root.geometry("760x640")
+        root.minsize(560, 480)
 
         pad = {"padx": 14, "pady": 6}
         main = ttk.Frame(root, padding=10)
@@ -78,17 +78,20 @@ class App:
         ttk.Label(main, text="İstəsəniz abzasın əvvəlinə [açar söz] yazaraq videonu özünüz seçin.",
                   foreground="#666").pack(anchor="w", padx=14)
 
-        box = ttk.Frame(main)
-        box.pack(fill="both", expand=True, **pad)
-        self.text = tk.Text(box, wrap="word", font=("Segoe UI", 11), undo=True)
-        sb = ttk.Scrollbar(box, command=self.text.yview)
-        self.text.configure(yscrollcommand=sb.set)
-        self.text.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
-        self.text.insert("1.0", self.cfg.get("last_script") or EXAMPLE)
+        # Bottom controls are packed first so they always stay visible
+        btns = ttk.Frame(main)
+        btns.pack(side="bottom", fill="x", padx=14, pady=12)
+        self.go = ttk.Button(btns, text="▶  Video yarat", command=self.start)
+        self.go.pack(side="left")
+        ttk.Button(btns, text="📁  Qovluğu aç", command=self.open_folder).pack(side="left", padx=8)
+
+        self.bar = ttk.Progressbar(main, maximum=1.0)
+        self.bar.pack(side="bottom", fill="x", padx=14)
+        self.status = ttk.Label(main, text="Hazır.")
+        self.status.pack(side="bottom", anchor="w", **pad)
 
         row = ttk.Frame(main)
-        row.pack(fill="x", **pad)
+        row.pack(side="bottom", fill="x", **pad)
         ttk.Label(row, text="Pixabay açarı:").grid(row=0, column=0, sticky="w")
         self.key = ttk.Entry(row, show="•")
         self.key.grid(row=0, column=1, sticky="ew", padx=8)
@@ -105,16 +108,15 @@ class App:
         self.rate.set(self.cfg.get("rate", "+5%"))
         self.rate.grid(row=2, column=1, sticky="w", padx=8, pady=(8, 0))
 
-        self.status = ttk.Label(main, text="Hazır.")
-        self.status.pack(anchor="w", **pad)
-        self.bar = ttk.Progressbar(main, maximum=1.0)
-        self.bar.pack(fill="x", padx=14)
-
-        btns = ttk.Frame(main)
-        btns.pack(fill="x", padx=14, pady=12)
-        self.go = ttk.Button(btns, text="▶  Video yarat", command=self.start)
-        self.go.pack(side="left")
-        ttk.Button(btns, text="📁  Qovluğu aç", command=self.open_folder).pack(side="left", padx=8)
+        # Script box takes whatever space is left
+        box = ttk.Frame(main)
+        box.pack(fill="both", expand=True, **pad)
+        self.text = tk.Text(box, wrap="word", font=("Segoe UI", 11), undo=True, height=6)
+        sb = ttk.Scrollbar(box, command=self.text.yview)
+        self.text.configure(yscrollcommand=sb.set)
+        self.text.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        self.text.insert("1.0", self.cfg.get("last_script") or EXAMPLE)
 
     def set_progress(self, msg, frac):
         self.root.after(0, lambda: (self.status.config(text=msg), self.bar.config(value=frac)))
